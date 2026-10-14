@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ics-calendar-mcp",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-13",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  // OAuth protocol state (hashed tokens, encrypted grants). Replace the
+  // placeholder ID with your own namespace when deploying.
+  "kv_namespaces": [
+    { "binding": "OAUTH_KV", "id": "00000000000000000000000000000000" }
+  ]
+  // Secrets (set with `wrangler secret put`, never committed):
+  //   GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, ALLOWED_GITHUB_USER_ID,
+  //   CALENDAR_REGISTRY (optional JSON registry), and one feed URL secret per
+  //   registry entry, e.g. CALENDAR_EXAMPLE_ICS_URL or CALENDAR_1_ICS_URL.
+}

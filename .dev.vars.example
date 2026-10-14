@@ -1,0 +1,16 @@
+# Copy to .dev.vars for local development. Never commit .dev.vars.
+# All values below are synthetic placeholders.
+
+# Feed URL for the example calendar in the default registry.
+CALENDAR_EXAMPLE_ICS_URL=https://calendar.example.com/feeds/example.ics
+
+# Optional: replace the default registry with your own JSON array.
+# Each entry: {"id","name","enabled","timezone","secretBinding","allowedHostname"}
+# CALENDAR_REGISTRY=[{"id":"work","name":"Work","enabled":true,"timezone":"America/New_York","secretBinding":"CALENDAR_1_ICS_URL","allowedHostname":"calendar.example.com"}]
+
+# GitHub OAuth application used for sign-in.
+GITHUB_CLIENT_ID=example-client-id
+GITHUB_CLIENT_SECRET=example-client-secret
+
+# Numeric GitHub user ID that may use this server (not the username).
+ALLOWED_GITHUB_USER_ID=12345678
