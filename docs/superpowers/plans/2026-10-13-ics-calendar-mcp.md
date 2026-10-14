@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build and publish a public, read-only Cloudflare Worker MCP server that turns administrator-configured ICS feeds into privacy-preserving busy intervals and free-slot suggestions.
+**Goal:** Build and publish a public, read-only ICS Calendar MCP project, deploy one OAuth-protected personal Worker with seven private feeds, and install and verify it as a personal ChatGPT plugin across supported surfaces.
 
-**Architecture:** A stateless MCP handler delegates to an availability service. The service resolves calendar IDs through a static registry, fetches only registered HTTPS feeds through a strict network policy, expands ICS occurrences, projects them immediately into detail-free intervals, and computes merged busy time or free slots. Transport, orchestration, ICS parsing, network security, and interval math stay independently testable.
+**Architecture:** A stateless MCP handler delegates to an availability service. The service resolves calendar IDs through a static registry, fetches only registered HTTPS feeds through a strict network policy, expands ICS occurrences, projects them immediately into detail-free intervals, and computes merged busy time or free slots. A same-Worker OAuth provider uses GitHub sign-in plus immutable-user-ID allowlisting before any MCP tool executes; transport, auth, orchestration, parsing, network security, and interval math stay independently testable.
 
-**Tech Stack:** TypeScript 7, Cloudflare Workers, `agents` 0.28, `@modelcontextprotocol/server` 2.3, Zod 4, ICAL.js 2.2, Vitest 5, Cloudflare Vitest Pool Workers, Wrangler 4, ESLint 10, npm, GitHub Actions.
+**Tech Stack:** TypeScript 7, Cloudflare Workers, `agents` 0.28, `@modelcontextprotocol/server` 2.3, `@cloudflare/workers-oauth-provider` 1.2, Zod 4, ICAL.js 2.2, Vitest 5, Cloudflare Vitest Pool Workers, Wrangler 4, ESLint 10, npm, GitHub Actions.
 
 **Spec:** `docs/superpowers/specs/2026-10-13-ics-calendar-mcp-design.md`
 
@@ -14,6 +14,9 @@
 
 - V1 is read-only: no CalDAV, create, update, delete, invitations, or write-capable provider interface.
 - MCP exposes exactly `list_calendars`, `get_free_busy`, and `find_free_slots`.
+- Every tool requires OAuth scope `calendar:read`; the deployed Worker allows only the operator's GitHub numeric user ID, supplied outside public source.
+- Keep one stable production Worker named `ics-calendar-mcp`; do not create version-specific Workers or retain a sandbox after verification.
+- The personal deployment uses seven separate calendar secret bindings. Never write their values to disk, Git, command output, logs, tests, or MCP responses.
 - Never return or log event titles, descriptions, attendees, locations, organizers, raw ICS, feed URLs, secret binding names, or provider response bodies.
 - Calendar URLs come only from administrator registry entries and Worker secret bindings, never caller input.
 - Fetches require HTTPS, exact hostname matching, no embedded credentials, no redirects, a 10-second timeout, and a 5 MiB response limit.
@@ -23,6 +26,7 @@
 - Tests use synthetic fixtures and never contact real providers or require credentials.
 - Successful live fetches report `fresh`; unavailable calendars make the aggregate response incomplete. V0.1 has no stale cache and never reports unavailable data as empty.
 - Public documentation and GitHub metadata must describe only implemented behavior and contain no personal or employer identifiers.
+- ChatGPT installation is personal, not public-directory publication. Mobile and Voice are verified capabilities, not assumed capabilities.
 
 ## Review Focus
 
@@ -31,6 +35,7 @@
 - A multi-calendar request with one failed feed must return partial intervals with `complete: false`, never an apparently empty source; Task 5 pins this behavior.
 - Hostname tricks (`userinfo@host`, suffix domains, redirects, and mixed case) must not bypass the fetch policy; Task 3 tests each input class.
 - DST gaps, repeated hours, and overnight working windows can corrupt slot calculations; Tasks 2 and 4 test DST boundaries and Task 2 explicitly rejects overnight working windows in V0.1.
+- OAuth confused-deputy, CSRF, mutable-username, and insufficient-scope failures must deny access before calendar resolution; Task 6 exercises each path.
 
 ---
 
@@ -286,7 +291,63 @@
   git commit -m "feat: aggregate calendar availability"
   ```
 
-### Task 6: MCP schemas, tools, and Cloudflare Worker endpoint
+### Task 6: OAuth protection and GitHub identity allowlist
+
+**Files:**
+- Create: `src/auth/github.ts`
+- Create: `src/auth/policy.ts`
+- Create: `src/auth/handler.ts`
+- Create: `src/auth/consent.ts`
+- Modify: `wrangler.jsonc`
+- Test: `tests/unit/auth-policy.test.ts`
+- Test: `tests/integration/oauth.test.ts`
+
+**Interfaces:**
+- Consumes: `CalendarError` and redaction from Tasks 1 and 3.
+- Produces: `fetchGitHubIdentity(accessToken: string, fetchImpl?: typeof fetch): Promise<GitHubIdentity>` with immutable numeric `id` and `login`.
+- Produces: `assertAllowedIdentity(identity: GitHubIdentity, allowedUserId: string): void`.
+- Produces: `createOAuthHandler(env: OAuthEnv, mcpHandler: ExportedHandlerFetchHandler): ExportedHandler` using `@cloudflare/workers-oauth-provider`.
+
+- [ ] **Step 1: Add failing identity-policy tests**
+
+  Test exact numeric-ID acceptance, wrong-ID rejection, missing-ID rejection, mutable-login mismatch tolerance when the numeric ID matches, GitHub API non-2xx handling, oversized or malformed profile responses, and public error redaction.
+
+- [ ] **Step 2: Add failing OAuth integration tests**
+
+  Test RFC 9728 protected-resource metadata, OAuth discovery, unauthenticated `401` plus `WWW-Authenticate`, PKCE requirement, exact redirect validation, CSRF rejection, missing `calendar:read` rejection, denied GitHub identity, valid token context, and proof that MCP/calendar dependencies are not invoked before authentication succeeds.
+
+- [ ] **Step 3: Run auth tests and confirm failure**
+
+  Run: `npm test -- tests/unit/auth-policy.test.ts tests/integration/oauth.test.ts`
+
+  Expected: FAIL because auth modules do not exist.
+
+- [ ] **Step 4: Implement GitHub identity resolution and immutable-ID policy**
+
+  Request only the GitHub profile needed to obtain `id` and `login`; never log or return the upstream token or raw profile. Compare `String(identity.id)` to `env.ALLOWED_GITHUB_USER_ID` with no username-only fallback.
+
+- [ ] **Step 5: Implement the same-Worker OAuth provider**
+
+  Use Workers OAuth Provider 1.x with GitHub upstream sign-in, consent, secure cookies, CSRF validation, PKCE, protected-resource metadata, DCR/CIMD-compatible client handling, KV-backed OAuth state, and `calendar:read` scope. Route authenticated requests to the stateless MCP handler.
+
+- [ ] **Step 6: Configure only binding names in Wrangler**
+
+  Declare `OAUTH_KV` and the seven calendar secret binding names, but no IDs or secret values. Keep the stable Worker name `ics-calendar-mcp`. The live KV ID is injected only during authorized deployment preparation and must not be committed if it identifies the private deployment.
+
+- [ ] **Step 7: Run auth and static checks**
+
+  Run: `npm run check && npm run lint && npm test -- tests/unit/auth-policy.test.ts tests/integration/oauth.test.ts`
+
+  Expected: all commands exit 0.
+
+- [ ] **Step 8: Commit OAuth protection**
+
+  ```bash
+  git add src/auth wrangler.jsonc tests/unit/auth-policy.test.ts tests/integration/oauth.test.ts package.json package-lock.json
+  git commit -m "feat: protect calendar tools with OAuth"
+  ```
+
+### Task 7: MCP schemas, tools, and Cloudflare Worker endpoint
 
 **Files:**
 - Create: `src/mcp/schemas.ts`
@@ -296,10 +357,10 @@
 - Test: `tests/integration/mcp.test.ts`
 
 **Interfaces:**
-- Consumes: `CalendarService` from Task 5.
+- Consumes: `CalendarService` from Task 5 and the authenticated request context from Task 6.
 - Produces: Zod schemas `freeBusyInputSchema` and `findFreeSlotsInputSchema`.
 - Produces: `createServer(service: CalendarService): McpServer` registering exactly three tools.
-- Produces: default Worker export with `fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response>` mounting stateless Streamable HTTP at `/mcp`.
+- Produces: the stateless `/mcp` handler supplied to Task 6's OAuth provider and a default Worker export that protects the route before dispatch.
 
 - [ ] **Step 1: Add failing MCP integration tests**
 
@@ -323,9 +384,9 @@
 
   Use `McpServer` from `@modelcontextprotocol/server`. Return a human-readable text content block plus `structuredContent` for successful results. Convert failures through `redactError()` and mark tool results as errors without embedding causes.
 
-- [ ] **Step 6: Mount the stateless Worker handler**
+- [ ] **Step 6: Mount the stateless MCP handler behind OAuth**
 
-  Use `createMcpHandler` from `agents/mcp/server`, creating a fresh server for each request with the request's Worker environment captured by the object-style Worker `fetch()` method. Configure exact route `/mcp`, no wildcard browser origins, and generic out-of-band error logging.
+  Use `createMcpHandler` from `agents/mcp/server`, creating a fresh server for each request with the request's Worker environment. Pass the handler to Task 6's OAuth provider, configure exact route `/mcp`, deny wildcard browser origins, require `calendar:read`, and keep out-of-band logging generic.
 
 - [ ] **Step 7: Run integration and full test suites**
 
@@ -340,7 +401,7 @@
   git commit -m "feat: expose read-only calendar MCP tools"
   ```
 
-### Task 7: Public documentation, contribution policy, and CI
+### Task 8: Public documentation, contribution policy, and CI
 
 **Files:**
 - Create: `README.md`
@@ -354,7 +415,7 @@
 - Test: `tests/meta/public-repository.test.ts`
 
 **Interfaces:**
-- Consumes: the implemented scripts, configuration, and limitations from Tasks 1–6.
+- Consumes: the implemented scripts, configuration, and limitations from Tasks 1–7.
 - Produces: contributor-facing setup and security documentation that exactly matches v0.1 behavior.
 
 - [ ] **Step 1: Add failing repository-hygiene tests**
@@ -369,7 +430,7 @@
 
 - [ ] **Step 3: Write the public README and policies**
 
-  Document purpose, architecture, requirements, local setup, registry customization, Worker secret setup, MCP Inspector usage, tool examples, threat model, privacy guarantees, unsupported behavior, deployment authentication warning, limitations, roadmap, contribution workflow, and vulnerability reporting. State that the endpoint has no authentication in v0.1 and must not be exposed publicly without an access layer.
+  Document purpose, architecture, requirements, local setup, registry customization, Worker secret setup, GitHub OAuth configuration, MCP Inspector usage, tool examples, threat model, privacy guarantees, unsupported behavior, limitations, roadmap, contribution workflow, and vulnerability reporting. Make clear that a source repository is public while each operator's deployed feed credentials and OAuth allowlist are private.
 
 - [ ] **Step 4: Add MIT license and project governance files**
 
@@ -392,15 +453,15 @@
   git commit -m "docs: prepare public open source repository"
   ```
 
-### Task 8: Security review, public GitHub publication, and live metadata verification
+### Task 9: Security review, public GitHub publication, private deployment, and live verification
 
 **Files:**
 - Modify: `CHANGELOG.md`
 - Create: no additional product files expected
 
 **Interfaces:**
-- Consumes: complete local repository from Tasks 1–7.
-- Produces: public GitHub repository `mihirkavi/ics-calendar-mcp` with verified visibility, license, description, topics, default branch, and passing CI.
+- Consumes: complete local repository from Tasks 1–8.
+- Produces: public GitHub repository `mihirkavi/ics-calendar-mcp` with verified metadata and passing CI, plus one authenticated private production deployment containing seven secret-backed feeds.
 
 - [ ] **Step 1: Run pre-publication secret and history review**
 
@@ -431,4 +492,66 @@
 - [ ] **Step 7: Tag the verified release**
 
   Create annotated tag `v0.1.0` at the verified commit and push it. Re-run `gh repo view` after the tag to ensure repository metadata remains correct.
+
+- [ ] **Step 8: Inspect Cloudflare inventory and prepare the private deployment**
+
+  List Workers, routes, KV namespaces, bindings, and relevant secrets metadata. Reuse `ics-calendar-mcp` if it already exists; otherwise create only that production Worker. Create or reuse one OAuth KV namespace and record its identifier in local deployment configuration that remains ignored by Git.
+
+- [ ] **Step 9: Configure the GitHub OAuth application**
+
+  Create or update one GitHub OAuth application named `ICS Calendar MCP` with homepage equal to the Worker origin and callback equal to `<worker-origin>/callback`. Store its client ID and secret plus a freshly generated cookie encryption key as Worker secrets. Configure the operator's allowed GitHub numeric user ID outside the public repository.
+
+- [ ] **Step 10: Configure seven calendar secrets**
+
+  Convert each supplied `webcal://` value to `https://` in memory and put it into its distinct Worker secret binding without printing it. Never create a plaintext secret file. Confirm only binding names and secret presence through Wrangler metadata.
+
+- [ ] **Step 11: Deploy and verify authentication before calendar access**
+
+  Deploy `ics-calendar-mcp`, fetch its OAuth discovery metadata, confirm unauthenticated `/mcp` returns `401` with the correct challenge, complete GitHub OAuth as the allowed user, and prove a denied or missing token cannot reach calendar code.
+
+- [ ] **Step 12: Verify all seven live feeds and three tools**
+
+  Through an authenticated MCP client, call `list_calendars`, `get_free_busy`, and `find_free_slots` across all seven feeds. Confirm every source reports fresh coverage, responses contain no event-detail fields or feed URLs, multi-calendar overlaps merge correctly, and a forced source failure reports incomplete coverage rather than empty availability.
+
+### Task 10: Personal ChatGPT plugin installation and supported-surface validation
+
+**Files:**
+- Create: `docs/verification/chatgpt-plugin-verification.md`
+- Modify: `README.md`
+
+**Interfaces:**
+- Consumes: the verified OAuth-protected production `/mcp` endpoint from Task 9.
+- Produces: a personal ChatGPT plugin installation and a dated evidence record for web, desktop, iPhone, and Voice behavior.
+
+- [ ] **Step 1: Add the authenticated MCP server as a personal plugin**
+
+  In ChatGPT Plugins, choose Add custom MCP server, enter `ICS Calendar`, use the production `/mcp` URL, select OAuth authentication, complete GitHub sign-in, review discovered tools, and create the personal plugin. Do not submit it to the public Plugins Directory because it fronts one person's calendars.
+
+- [ ] **Step 2: Install and verify in ChatGPT Work on the web**
+
+  Install the personal plugin, invoke it explicitly, and test calendar listing, tomorrow's combined busy time, and a free-slot query. Record tool selection, arguments, response shape, OAuth behavior, and confirmation that no event details or feed URLs appear.
+
+- [ ] **Step 3: Verify in the desktop app**
+
+  Confirm the installed plugin appears for the same account, run the same read-only evaluation set, and compare results with the authenticated MCP client evidence.
+
+- [ ] **Step 4: Verify iPhone availability**
+
+  On the signed-in iPhone ChatGPT experience, check whether the personal plugin appears and can be invoked in a Work chat. Run at least one calendar-list and one free/busy request when the surface supports it.
+
+- [ ] **Step 5: Verify Voice behavior**
+
+  Attempt the spoken request “Check all my calendars and tell me when I am busy tomorrow” in the supported Voice/Work path. Confirm whether the plugin is called and its result matches text-mode evidence. If direct invocation is unavailable because of rollout or surface constraints, test voice dictation into the verified Work chat and Voice through a supported connected desktop host, then document the exact working fallback without claiming native mobile Voice support.
+
+- [ ] **Step 6: Record evidence and update public limitations**
+
+  Write a verification document containing date, surfaces, prompts, pass/fail results, and non-sensitive screenshots or textual evidence. Update README platform claims to match observed behavior exactly. Never include account IDs, access tokens, calendar names that reveal private context, or calendar URLs.
+
+- [ ] **Step 7: Rotate initially shared calendar links**
+
+  After the end-to-end path works, guide the operator to regenerate each published calendar link in Apple Calendar, replace each Worker secret without printing it, re-run all-seven-feed verification, and confirm the original links no longer return calendars. If the operator explicitly chooses not to rotate, record that residual bearer-link exposure as an unresolved hardening item rather than calling the deployment fully hardened.
+
+- [ ] **Step 8: Commit verification-safe documentation and rerun release checks**
+
+  Run `npm run check && npm run lint && npm test`, commit only non-sensitive verification documentation, push `main`, and confirm remote CI remains green.
 
