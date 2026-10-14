@@ -10,7 +10,9 @@ describe("redaction", () => {
   });
 
   it("removes authorization header values and long tokens", () => {
-    const text = scrubText("Authorization: Bearer abc.def.ghi token gho_abcdefghijklmnopqrstuvwxyz0123");
+    // Built at runtime so the synthetic token never looks like a committed credential.
+    const fakeToken = `gho_${"x".repeat(32)}`;
+    const text = scrubText(`Authorization: Bearer abc.def.ghi token ${fakeToken}`);
     expect(text).not.toContain("abc.def.ghi");
     expect(text).not.toContain("gho_");
   });
