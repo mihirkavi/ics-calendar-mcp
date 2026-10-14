@@ -48,7 +48,7 @@ If any calendar can't be read, its coverage is `unavailable` and `complete` is `
 
 - **No event content.** The ICS adapter reads only start, end, duration, recurrence, status, and transparency. It projects each occurrence into a bare time interval before anything else sees it. Tests confirm that titles, descriptions, locations, organizers, attendees, UIDs, and raw ICS never appear in tool output or errors.
 - **Callers can't choose URLs.** Feeds come only from an operator-defined registry and Worker secrets. Each fetch requires HTTPS and an exact hostname match. It rejects embedded credentials, custom ports, and redirects, times out after 10 seconds, and stops reading past 5 MiB.
-- **Bounded work.** Query ranges are capped at 93 days and recurrence expansion at 10,000 occurrences per calendar per request.
+- **Bounded work.** Query ranges are capped at 93 days. Each calendar may emit at most 10,000 busy occurrences per request and generate at most 100,000 recurrence candidates while expanding.
 - **Authenticated access.** Every MCP request needs an OAuth access token with the `calendar:read` scope. Tokens are issued only after GitHub sign-in, and only to the GitHub account whose immutable numeric ID matches `ALLOWED_GITHUB_USER_ID`. A username is never enough. The MCP handler re-checks that ID and the scope on every request.
 - **Safe OAuth flow.** It uses PKCE (S256), exact redirect-URI validation, and a consent page that can't be framed and is bound to the browser with cookies (CSRF protection). The GitHub `state` is single-use and browser-bound, and the GitHub access token is discarded after the identity check. OAuth state lives in Cloudflare KV, with tokens stored only as hashes.
 - **Redacted errors.** Public errors carry a stable code and a generic message. URLs, query strings, credentials, and calendar text are scrubbed.
@@ -166,7 +166,7 @@ Example prompts: "What does my calendar look like tomorrow?", "Find me a free ho
 - Feeds are fetched live on every request. A slow or offline provider makes that calendar `unavailable` (reported, never silently empty). There's no cache.
 - ICS feeds published by calendar apps can lag behind the app by several minutes, depending on the provider.
 - Working-hour windows can't cross midnight, and `find_free_slots` returns at most 100 windows.
-- A series that generates more than 10,000 occurrences between its start and the end of the query (such as a minute-level rule) makes that calendar `unavailable` for the request.
+- A calendar that needs more than 100,000 recurrence candidates to reach the end of the query (for example, a minute-level rule running for years), or that has more than 10,000 busy occurrences in the range, is reported as `unavailable` for that request.
 - Timezone names without a matching `VTIMEZONE` must be IANA names. Windows-style names such as `Pacific Standard Time` are only understood when the feed includes their definition.
 
 ## Roadmap
