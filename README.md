@@ -122,11 +122,13 @@ Feed URLs must be `https://`. If your calendar app gives you a `webcal://` link,
 
 ## Deploying to Cloudflare
 
-1. Create a KV namespace for OAuth state, then put its ID in `wrangler.jsonc` (or a local, uncommitted copy of it):
+1. Create a KV namespace for OAuth state:
 
    ```bash
    npx wrangler kv namespace create OAUTH_KV
    ```
+
+   Put its ID in `wrangler.jsonc`. If you don't want the ID in Git, copy the file to `wrangler.local.jsonc` (ignored by Git), edit the copy, and pass `-c wrangler.local.jsonc` to the Wrangler commands below. `npm run deploy:local` does this for you.
 
 2. Create a [GitHub OAuth App](https://github.com/settings/developers). Set the homepage URL to your Worker origin and the authorization callback URL to `https://<your-worker-host>/callback`.
 3. Set the secrets (each command prompts for the value):
@@ -144,6 +146,8 @@ Feed URLs must be `https://`. If your calendar app gives you a `webcal://` link,
    ```bash
    npm run deploy
    ```
+
+   Each `secret put` asks for its value interactively, so secrets never land in your shell history or in files.
 
 The MCP endpoint is `https://<your-worker-host>/mcp`. OAuth discovery is published at `/.well-known/oauth-protected-resource/mcp` and `/.well-known/oauth-authorization-server`, and clients can register dynamically at `/register`.
 

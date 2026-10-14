@@ -14,7 +14,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "deploy:local": "wrangler deploy -c wrangler.local.jsonc"
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "^1.2.3",
