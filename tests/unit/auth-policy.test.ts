@@ -47,7 +47,11 @@ describe("assertAllowedIdentity", () => {
 });
 
 describe("fetchGitHubIdentity", () => {
-  const respond = (body: unknown, init: ResponseInit = {}) => vi.fn(async () => new Response(typeof body === "string" ? body : JSON.stringify(body), init));
+  const respond = (body: unknown, init: ResponseInit = {}) =>
+    vi.fn(async (url: RequestInfo | URL, requestInit?: RequestInit) => {
+      new Request(url, requestInit); // runtime validation of fetch options
+      return new Response(typeof body === "string" ? body : JSON.stringify(body), init);
+    });
 
   it("returns only the immutable ID and login", async () => {
     const fetchImpl = respond({ id: 12345678, login: "renamed-user", email: "private@example.com", name: "Private Name" });
@@ -79,13 +83,17 @@ describe("exchangeGitHubCode", () => {
   const options = { code: "c", verifier: "v", clientId: "id", clientSecret: "secret", redirectUri: "https://mcp.example.com/callback" };
 
   it("sends the PKCE verifier and returns the token", async () => {
-    const fetchImpl = vi.fn(async () => Response.json({ access_token: "gho_abc" }));
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      new Request(url, init); // runtime validation of fetch options
+      return Response.json({ access_token: "gho_abc" });
+    });
     await expect(exchangeGitHubCode(options, fetchImpl)).resolves.toBe("gho_abc");
     const body = String((fetchImpl.mock.calls[0] as unknown as [string, RequestInit])[1].body);
     expect(body).toContain("code_verifier=v");
   });
 
-  it("rejects error responses", async () => {
+  it("rejects redirects and error responses", async () => {
+    expect(await asyncCode(exchangeGitHubCode(options, vi.fn(async () => new Response(null, { status: 302, headers: { Location: "https://evil.test" } }))))).toBe("unauthorized");
     expect(await asyncCode(exchangeGitHubCode(options, vi.fn(async () => Response.json({ error: "bad_verification_code" }))))).toBe("unauthorized");
   });
 });

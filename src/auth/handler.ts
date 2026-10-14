@@ -16,6 +16,11 @@ export interface AuthEnv {
   GITHUB_CLIENT_ID?: string;
   GITHUB_CLIENT_SECRET?: string;
   ALLOWED_GITHUB_USER_ID?: string;
+  PUBLIC_BASE_URL?: string;
+}
+
+function callbackUrl(request: Request, env: AuthEnv): string {
+  return new URL("/callback", env.PUBLIC_BASE_URL ?? request.url).toString();
 }
 
 /** Encrypted into each grant; available to the MCP handler as `ctx.props`. */
@@ -89,7 +94,7 @@ export function createAuthHandler(options: { fetchImpl?: typeof fetch } = {}) {
     const upstream = await oauth.beginUpstream(approved.request, { data: { verifier } satisfies UpstreamData, headers: approved.headers });
     const target = new URL(GITHUB_AUTHORIZE_URL);
     target.searchParams.set("client_id", clientId);
-    target.searchParams.set("redirect_uri", new URL("/callback", request.url).toString());
+    target.searchParams.set("redirect_uri", callbackUrl(request, env));
     target.searchParams.set("state", upstream.state);
     target.searchParams.set("code_challenge", await s256(verifier));
     target.searchParams.set("code_challenge_method", "S256");
@@ -114,7 +119,7 @@ export function createAuthHandler(options: { fetchImpl?: typeof fetch } = {}) {
           verifier: resumed.data.verifier,
           clientId: github.clientId,
           clientSecret: github.clientSecret,
-          redirectUri: new URL("/callback", request.url).toString(),
+          redirectUri: callbackUrl(request, env),
         },
         fetchImpl,
       );

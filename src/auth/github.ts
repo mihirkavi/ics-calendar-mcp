@@ -41,7 +41,7 @@ export async function exchangeGitHubCode(
   try {
     const response = await fetchImpl(GITHUB_TOKEN_URL, {
       method: "POST",
-      redirect: "error",
+      redirect: "manual",
       signal: timeout.signal,
       headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
@@ -69,7 +69,7 @@ export async function fetchGitHubIdentity(accessToken: string, fetchImpl: typeof
   const timeout = withTimeout();
   try {
     const response = await fetchImpl(GITHUB_USER_URL, {
-      redirect: "error",
+      redirect: "manual",
       signal: timeout.signal,
       headers: {
         Accept: "application/vnd.github+json",

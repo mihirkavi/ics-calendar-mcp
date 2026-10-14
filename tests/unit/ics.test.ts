@@ -8,7 +8,7 @@ const iso = (ms: number) => new Date(ms).toISOString();
 const spans = (intervals: EpochInterval[]) =>
   intervals.map((interval) => `${iso(interval.startMs)}/${iso(interval.endMs)}/${interval.status}`).sort();
 
-function parse(ics: string, start: string, end: string, extra: { occurrenceLimit?: number; defaultTimezone?: string } = {}) {
+function parse(ics: string, start: string, end: string, extra: { occurrenceLimit?: number; iterationLimit?: number; defaultTimezone?: string } = {}) {
   return parseBusyIntervals({
     ics,
     calendarId: "fixture",
@@ -16,8 +16,11 @@ function parse(ics: string, start: string, end: string, extra: { occurrenceLimit
     rangeStartMs: Date.parse(start),
     rangeEndMs: Date.parse(end),
     ...(extra.occurrenceLimit ? { occurrenceLimit: extra.occurrenceLimit } : {}),
+    ...(extra.iterationLimit ? { iterationLimit: extra.iterationLimit } : {}),
   });
 }
+
+const cal = (body: string) => `BEGIN:VCALENDAR\nVERSION:2.0\n${body}\nEND:VCALENDAR`;
 
 /** Excludes the old daily series so single-event assertions stay readable. */
 const withoutDaily = (intervals: EpochInterval[]) => intervals.filter((interval) => new Date(interval.startMs).getUTCHours() !== 7);
@@ -116,14 +119,86 @@ END:VCALENDAR`;
     ]);
   });
 
-  it("enforces the occurrence cap", () => {
+  it("does not count occurrences before the range toward the occurrence cap", () => {
+    const ics = cal(`BEGIN:VEVENT\nUID:ancient@fixture.test\nDTSTART;TZID=America/New_York:19980101T090000\nDTEND;TZID=America/New_York:19980101T093000\nRRULE:FREQ=DAILY\nEND:VEVENT`);
+    expect(spans(parse(ics, "2026-10-14T00:00:00Z", "2026-10-15T00:00:00Z"))).toEqual(["2026-10-14T13:00:00.000Z/2026-10-14T13:30:00.000Z/busy"]);
+  });
+
+  it("enforces the emitted-occurrence cap", () => {
+    expect(() => parse(comprehensive, "2026-10-01T00:00:00Z", "2026-12-01T00:00:00Z", { occurrenceLimit: 20 })).toThrowError(/more than 20/);
+  });
+
+  it("enforces the iteration cap", () => {
     try {
-      parse(comprehensive, "2026-10-14T00:00:00Z", "2026-10-16T00:00:00Z", { occurrenceLimit: 500 });
+      parse(comprehensive, "2026-10-14T00:00:00Z", "2026-10-16T00:00:00Z", { iterationLimit: 500 });
       throw new Error("expected cap");
     } catch (error) {
       expect(error).toBeInstanceOf(CalendarError);
       expect((error as CalendarError).code).toBe("too_many_occurrences");
     }
+  });
+
+  it("matches a UTC RECURRENCE-ID against a zoned series", () => {
+    const ics = cal(`BEGIN:VEVENT
+UID:zoned@fixture.test
+DTSTART;TZID=America/New_York:20261005T100000
+DTEND;TZID=America/New_York:20261005T110000
+RRULE:FREQ=WEEKLY;COUNT=4
+END:VEVENT
+BEGIN:VEVENT
+UID:zoned@fixture.test
+RECURRENCE-ID:20261012T140000Z
+DTSTART;TZID=America/New_York:20261013T160000
+DTEND;TZID=America/New_York:20261013T170000
+END:VEVENT`);
+    expect(spans(parse(ics, "2026-10-12T00:00:00Z", "2026-10-14T00:00:00Z"))).toEqual(["2026-10-13T20:00:00.000Z/2026-10-13T21:00:00.000Z/busy"]);
+  });
+
+  it("keeps an override whose RECURRENCE-ID no longer matches the series", () => {
+    const ics = cal(`BEGIN:VEVENT
+UID:edited@fixture.test
+DTSTART:20261005T150000Z
+DTEND:20261005T160000Z
+RRULE:FREQ=WEEKLY;COUNT=4
+END:VEVENT
+BEGIN:VEVENT
+UID:edited@fixture.test
+RECURRENCE-ID:20261012T140000Z
+DTSTART:20261013T170000Z
+DTEND:20261013T180000Z
+END:VEVENT`);
+    expect(spans(parse(ics, "2026-10-12T00:00:00Z", "2026-10-14T00:00:00Z"))).toEqual([
+      "2026-10-12T15:00:00.000Z/2026-10-12T16:00:00.000Z/busy",
+      "2026-10-13T17:00:00.000Z/2026-10-13T18:00:00.000Z/busy",
+    ]);
+  });
+
+  it("applies overrides on a non-recurring master", () => {
+    const ics = cal(`BEGIN:VEVENT
+UID:single@fixture.test
+DTSTART:20261012T150000Z
+DTEND:20261012T160000Z
+END:VEVENT
+BEGIN:VEVENT
+UID:single@fixture.test
+RECURRENCE-ID:20261012T150000Z
+DTSTART:20261012T180000Z
+DTEND:20261012T190000Z
+END:VEVENT`);
+    expect(spans(parse(ics, "2026-10-12T00:00:00Z", "2026-10-13T00:00:00Z"))).toEqual(["2026-10-12T18:00:00.000Z/2026-10-12T19:00:00.000Z/busy"]);
+  });
+
+  it("expands every recurring series when UIDs are missing or duplicated", () => {
+    const series = (uid: string, hour: string) =>
+      `BEGIN:VEVENT\n${uid}DTSTART:20261012T${hour}0000Z\nDTEND:20261012T${hour}3000Z\nRRULE:FREQ=DAILY;COUNT=3\nEND:VEVENT`;
+    const ics = cal([series("", "13"), series("", "15"), series("UID:dup@fixture.test\n", "17"), series("UID:dup@fixture.test\n", "19")].join("\n"));
+    const result = spans(parse(ics, "2026-10-14T00:00:00Z", "2026-10-15T00:00:00Z"));
+    expect(result).toEqual([
+      "2026-10-14T13:00:00.000Z/2026-10-14T13:30:00.000Z/busy",
+      "2026-10-14T15:00:00.000Z/2026-10-14T15:30:00.000Z/busy",
+      "2026-10-14T17:00:00.000Z/2026-10-14T17:30:00.000Z/busy",
+      "2026-10-14T19:00:00.000Z/2026-10-14T19:30:00.000Z/busy",
+    ]);
   });
 });
 

@@ -7,7 +7,12 @@ const SECRET_URL = "https://calendar.example.com/private/feed.ics?token=SECRET-T
 const ICS = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n";
 
 function ok(body: BodyInit | null = ICS, init: ResponseInit = {}) {
-  return vi.fn(async () => new Response(body, { status: 200, ...init }));
+  return vi.fn(async (url: RequestInfo | URL, requestInit?: RequestInit) => {
+    // Constructing a real Request makes the Workers runtime validate the
+    // options the production code passes to fetch (e.g. redirect mode).
+    new Request(url, requestInit);
+    return new Response(body, { status: 200, ...init });
+  });
 }
 
 async function failure(promise: Promise<unknown>): Promise<CalendarError> {
@@ -27,7 +32,7 @@ describe("fetchCalendar", () => {
     const result = await fetchCalendar(new URL(SECRET_URL), HOST, { fetchImpl, now: () => new Date("2026-10-14T00:00:00Z") });
     expect(result).toEqual({ body: ICS, fetchedAt: "2026-10-14T00:00:00.000Z" });
     const init = (fetchImpl.mock.calls[0] as unknown as [string, RequestInit])[1];
-    expect(init.redirect).toBe("error");
+    expect(init.redirect).toBe("manual");
     expect(init.signal).toBeInstanceOf(AbortSignal);
   });
 
@@ -46,6 +51,18 @@ describe("fetchCalendar", () => {
     const error = await failure(fetchCalendar(new URL(value), HOST, { fetchImpl }));
     expect(error.code).toBe("calendar_not_configured");
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("passes options the Workers runtime accepts", async () => {
+    const seen: RequestInit[] = [];
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      seen.push(init!);
+      new Request(url, init);
+      return new Response(ICS);
+    });
+    await fetchCalendar(new URL(SECRET_URL), HOST, { fetchImpl });
+    expect(() => new Request(SECRET_URL, { redirect: "error" })).toThrow();
+    expect(seen[0]?.redirect).toBe("manual");
   });
 
   it("treats a redirect response as unavailable", async () => {

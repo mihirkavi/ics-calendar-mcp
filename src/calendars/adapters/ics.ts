@@ -5,7 +5,10 @@ import { clipEpochInterval } from "../availability";
 import { isValidTimeZone, zonedTimeToEpoch } from "../time";
 import type { BusyStatus } from "../types";
 
+/** Maximum busy occurrences emitted per calendar per request. */
 export const DEFAULT_OCCURRENCE_LIMIT = 10_000;
+/** Maximum recurrence candidates generated per calendar per request (CPU bound). */
+export const DEFAULT_ITERATION_LIMIT = 100_000;
 
 export interface ParseIcsInput {
   ics: string;
@@ -14,6 +17,7 @@ export interface ParseIcsInput {
   rangeStartMs: number;
   rangeEndMs: number;
   occurrenceLimit?: number;
+  iterationLimit?: number;
 }
 
 type IcalComponent = InstanceType<typeof ICAL.Component>;
@@ -27,6 +31,13 @@ interface ParseContext {
   rangeStartMs: number;
   rangeEndMs: number;
   embeddedZones: Map<string, IcalTimezone>;
+  occurrences: Budget;
+  iterations: Budget;
+}
+
+interface Budget {
+  remaining: number;
+  limit: number;
 }
 
 /**
@@ -42,40 +53,61 @@ export function parseBusyIntervals(input: ParseIcsInput): EpochInterval[] {
     rangeStartMs: input.rangeStartMs,
     rangeEndMs: input.rangeEndMs,
     embeddedZones: embeddedTimezones(root),
+    occurrences: budget(input.occurrenceLimit ?? DEFAULT_OCCURRENCE_LIMIT),
+    iterations: budget(input.iterationLimit ?? DEFAULT_ITERATION_LIMIT),
   };
-  const limit = input.occurrenceLimit ?? DEFAULT_OCCURRENCE_LIMIT;
-  const budget = { remaining: limit };
 
+  // Group by UID. Events without a UID cannot be related to anything, so each
+  // gets its own group.
   const groups = new Map<string, { masters: IcalComponent[]; exceptions: IcalComponent[] }>();
+  let anonymous = 0;
   for (const component of root.getAllSubcomponents("vevent")) {
-    const uid = String(component.getFirstPropertyValue("uid") ?? "");
-    const group = groups.get(uid) ?? { masters: [], exceptions: [] };
+    const uid = component.getFirstPropertyValue("uid");
+    const key = uid ? `uid:${String(uid)}` : `anon:${anonymous++}`;
+    const group = groups.get(key) ?? { masters: [], exceptions: [] };
     if (component.hasProperty("recurrence-id")) group.exceptions.push(component);
     else group.masters.push(component);
-    groups.set(uid, group);
+    groups.set(key, group);
   }
 
   const intervals: EpochInterval[] = [];
   for (const group of groups.values()) {
-    const master = group.masters[0];
-    if (!master) {
-      // An instance without its series (common for single-occurrence invites):
-      // treat each as a standalone event.
-      for (const exception of group.exceptions) addSingle(exception, context, intervals, budget, limit);
-      continue;
-    }
-    const event = safeEvent(master);
-    if (event.isRecurring()) {
-      for (const exception of group.exceptions) event.relateException(exception);
-      expandRecurring(event, group.exceptions, context, intervals, budget, limit);
-    } else {
-      addSingle(master, context, intervals, budget, limit);
-    }
-    // Additional masters with the same UID are malformed; include them as
-    // standalone events rather than silently dropping busy time.
-    for (const extra of group.masters.slice(1)) addSingle(extra, context, intervals, budget, limit);
+    const [master, ...extraMasters] = group.masters;
+    if (master) processSeries(master, group.exceptions, context, intervals);
+    else for (const exception of group.exceptions) addSingle(exception, context, intervals);
+    // Duplicate masters for one UID are malformed; keep their busy time rather
+    // than dropping it, but do not attach exceptions to them.
+    for (const extra of extraMasters) processSeries(extra, [], context, intervals);
   }
   return intervals;
+}
+
+function budget(limit: number): Budget {
+  return { remaining: limit, limit };
+}
+
+function processSeries(master: IcalComponent, exceptions: IcalComponent[], context: ParseContext, intervals: EpochInterval[]): void {
+  const event = safeEvent(master);
+  if (event.isRecurring()) {
+    expandRecurring(event, exceptions, context, intervals);
+    return;
+  }
+  // A non-recurring master can still carry an override for its only instance.
+  const masterStartMs = toEpoch(event.startDate, tzidOf(event.startDate), context);
+  const overridden = exceptions.some((exception) => recurrenceIdMs(exception, tzidOf(event.startDate), context) === masterStartMs);
+  if (!overridden) addSingle(master, context, intervals);
+  for (const exception of exceptions) addSingle(exception, context, intervals);
+}
+
+function recurrenceIdMs(exception: IcalComponent, masterTzid: string | undefined, context: ParseContext): number | undefined {
+  const recurrenceId = exception.getFirstPropertyValue("recurrence-id") as IcalTime | null;
+  if (!recurrenceId || typeof recurrenceId !== "object") return undefined;
+  return toEpoch(recurrenceId, tzidOf(recurrenceId) ?? masterTzid, context);
+}
+
+function isThisAndFuture(exception: IcalComponent): boolean {
+  const range = exception.getFirstProperty("recurrence-id")?.getParameter("range");
+  return String(range ?? "").toUpperCase() === "THISANDFUTURE";
 }
 
 function parseRoot(ics: string): IcalComponent {
@@ -111,10 +143,10 @@ function safeEvent(component: IcalComponent): IcalEvent {
   }
 }
 
-function spend(budget: { remaining: number }, limit: number): void {
+function spend(budget: Budget): void {
   budget.remaining -= 1;
   if (budget.remaining < 0) {
-    throw new CalendarError("too_many_occurrences", `A calendar produced more than ${limit} occurrences for the requested range.`);
+    throw new CalendarError("too_many_occurrences", `A calendar produced more than ${budget.limit} occurrences for the requested range.`);
   }
 }
 
@@ -168,17 +200,12 @@ function push(
     context.rangeStartMs,
     context.rangeEndMs,
   );
-  if (clipped) intervals.push(clipped);
+  if (!clipped) return;
+  spend(context.occurrences);
+  intervals.push(clipped);
 }
 
-function addSingle(
-  component: IcalComponent,
-  context: ParseContext,
-  intervals: EpochInterval[],
-  budget: { remaining: number },
-  limit: number,
-): void {
-  spend(budget, limit);
+function addSingle(component: IcalComponent, context: ParseContext, intervals: EpochInterval[]): void {
   const status = classify(component);
   if (!status) return;
   const event = safeEvent(component);
@@ -203,16 +230,23 @@ function addSingle(
   push(startMs, endMs, status, context, intervals);
 }
 
-function expandRecurring(
-  event: IcalEvent,
-  exceptions: IcalComponent[],
-  context: ParseContext,
-  intervals: EpochInterval[],
-  budget: { remaining: number },
-  limit: number,
-): void {
+function expandRecurring(event: IcalEvent, exceptions: IcalComponent[], context: ParseContext, intervals: EpochInterval[]): void {
   const masterTzid = tzidOf(event.startDate);
-  const seenRecurrenceIds = new Set<string>();
+  // Single-instance overrides are matched by instant, not by ICAL.js's string
+  // comparison, so a UTC RECURRENCE-ID still matches a zoned series. Only
+  // THISANDFUTURE overrides are delegated to ICAL.js, which shifts later
+  // occurrences.
+  const overrides = new Map<number, IcalComponent>();
+  for (const exception of exceptions) {
+    if (isThisAndFuture(exception)) {
+      event.relateException(exception);
+      continue;
+    }
+    const ms = recurrenceIdMs(exception, masterTzid, context);
+    if (ms !== undefined && !overrides.has(ms)) overrides.set(ms, exception);
+  }
+  const used = new Set<IcalComponent>();
+
   let iterator: ReturnType<IcalEvent["iterator"]>;
   try {
     iterator = event.iterator();
@@ -227,21 +261,27 @@ function expandRecurring(
       throw new CalendarError("feed_invalid");
     }
     if (!next) break;
-    spend(budget, limit);
+    spend(context.iterations);
     const originalStartMs = toEpoch(next, masterTzid, context);
     if (originalStartMs >= context.rangeEndMs) break;
-    seenRecurrenceIds.add(next.toString());
-    emitOccurrence(event, next, masterTzid, context, intervals);
+    const override = overrides.get(originalStartMs);
+    if (override) {
+      used.add(override);
+      addSingle(override, context, intervals);
+    } else {
+      emitOccurrence(event, next, masterTzid, context, intervals);
+    }
   }
 
-  // A modified occurrence whose original slot falls after the range can be
-  // moved into the range; include those explicitly.
+  // Overrides not consumed above were moved from a slot after the range, or
+  // no longer match a generated occurrence (for example after the series was
+  // edited). Their own start and end still describe real busy time.
+  for (const exception of overrides.values()) {
+    if (!used.has(exception)) addSingle(exception, context, intervals);
+  }
+  // Exceptions without a usable RECURRENCE-ID are kept as standalone events.
   for (const exception of exceptions) {
-    const recurrenceId = exception.getFirstPropertyValue("recurrence-id") as IcalTime | null;
-    if (!recurrenceId || seenRecurrenceIds.has(recurrenceId.toString())) continue;
-    const originalMs = toEpoch(recurrenceId, tzidOf(recurrenceId) ?? masterTzid, context);
-    if (originalMs < context.rangeEndMs) continue;
-    addSingle(exception, context, intervals, budget, limit);
+    if (!isThisAndFuture(exception) && recurrenceIdMs(exception, masterTzid, context) === undefined) addSingle(exception, context, intervals);
   }
 }
 

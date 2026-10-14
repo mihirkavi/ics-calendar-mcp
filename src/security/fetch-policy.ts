@@ -33,7 +33,7 @@ export async function fetchCalendar(url: URL, allowedHostname: string, options: 
     try {
       response = await fetchImpl(url.toString(), {
         method: "GET",
-        redirect: "error",
+        redirect: "manual",
         signal: controller.signal,
         headers: { Accept: "text/calendar, text/plain;q=0.5" },
       });
