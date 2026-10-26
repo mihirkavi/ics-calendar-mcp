@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset=".github/assets/banner-dark.png">
-    <img alt="ICS Calendar MCP: share when you're free, not what you're doing. A private MCP server that turns ICS calendar feeds into busy and free time ranges for AI assistants." src=".github/assets/banner-light.png" width="100%">
+    <img alt="ICS Calendar MCP: when you're busy, never what you're doing. A read-only MCP server that turns private ICS feeds into free and busy time ranges for AI assistants, shown beside a week calendar of anonymous busy and tentative blocks." src=".github/assets/banner-light.png" width="100%">
   </picture>
 </p>
 
@@ -19,10 +19,10 @@
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-111111?style=flat-square"></a>
-  <img alt="Runs on Cloudflare Workers" src="https://img.shields.io/badge/Cloudflare%20Workers%20%C2%B7%20TypeScript-111111?style=flat-square">
-  <img alt="Status: v0.1, early" src="https://img.shields.io/badge/status-v0.1%20early-6b6b6b?style=flat-square">
-  <a href="https://github.com/mihirkavi/ics-calendar-mcp/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/mihirkavi/ics-calendar-mcp/ci.yml?branch=main&style=flat-square&label=CI&color=111111"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-0a66c2?style=flat-square"></a>
+  <img alt="Runs on Cloudflare Workers" src="https://img.shields.io/badge/Cloudflare%20Workers%20%C2%B7%20TypeScript-1d1d1f?style=flat-square">
+  <img alt="Status: v0.1, early" src="https://img.shields.io/badge/status-v0.1%20early-6e6e73?style=flat-square">
+  <a href="https://github.com/mihirkavi/ics-calendar-mcp/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/mihirkavi/ics-calendar-mcp/ci.yml?branch=main&style=flat-square&label=CI&color=0a66c2"></a>
 </p>
 
 <p align="center">
@@ -39,15 +39,15 @@ To plan a meeting, an AI assistant needs to know when you're free. Most calendar
 <table>
   <tr>
     <td width="33%" valign="top">
-      <h3>🙈 Times, not details</h3>
+      <h3>Times, not details</h3>
       Titles, notes, attendees, locations and UIDs are dropped before anything else sees them. Tests check that none of them appear in any output or error.
     </td>
     <td width="33%" valign="top">
-      <h3>🔒 Read-only and yours alone</h3>
+      <h3>Read-only and yours alone</h3>
       No writes, no CalDAV. Every request needs an OAuth 2.1 token issued to one GitHub account, matched by its permanent numeric ID.
     </td>
     <td width="33%" valign="top">
-      <h3>🧭 Honest answers</h3>
+      <h3>Honest answers</h3>
       If a calendar can't be read, it is reported as <code>unavailable</code> and <code>complete</code> is <code>false</code>. An unreadable calendar is never treated as an empty one.
     </td>
   </tr>
