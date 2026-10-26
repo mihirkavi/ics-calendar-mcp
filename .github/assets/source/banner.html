@@ -1,0 +1,56 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500;600;700&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=block" rel="stylesheet">
+<style>
+:root{--bg:#f5f5f7;--card:#ffffff;--ink:#1d1d1f;--muted:#6e6e73;--line:#e3e3e8;--accent:#0a66c2;--accent-soft:rgba(10,102,194,.12);--hatch:rgba(10,102,194,.35);--redact:#1d1d1f}
+@media (prefers-color-scheme:dark){:root{--bg:#000000;--card:#1c1c1e;--ink:#f5f5f7;--muted:#a1a1a6;--line:#2c2c2e;--accent:#4ea1ff;--accent-soft:rgba(78,161,255,.16);--hatch:rgba(78,161,255,.45);--redact:#f5f5f7}}
+*{box-sizing:border-box;margin:0}
+body{width:1600px;height:600px;background:var(--bg);color:var(--ink);font-family:Inter,sans-serif;display:grid;grid-template-columns:820px 1fr;align-items:center;padding:0 88px;gap:48px;overflow:hidden}
+.eyebrow{font:500 19px "JetBrains Mono",monospace;color:var(--accent);letter-spacing:.02em;margin-bottom:26px}
+h1{font:700 68px/1.04 "Inter Tight",sans-serif;letter-spacing:-.035em}
+h1 span{color:var(--muted);font-weight:600}
+p.sub{font:400 24px/1.45 Inter,sans-serif;color:var(--muted);margin-top:28px;max-width:640px}
+.tags{display:flex;gap:10px;margin-top:34px;font:500 16px "JetBrains Mono",monospace}
+.tags b{font-weight:500;padding:8px 14px;border-radius:999px;border:1.5px solid var(--line);color:var(--ink);background:var(--card)}
+.cal{background:var(--card);border-radius:22px;padding:26px 28px 24px;box-shadow:0 1px 0 var(--line),0 24px 60px rgba(0,0,0,.08)}
+.calhead{display:flex;justify-content:space-between;font:500 15px "JetBrains Mono",monospace;color:var(--muted);margin-bottom:14px}
+.grid{display:grid;grid-template-columns:44px repeat(5,1fr);grid-template-rows:28px repeat(8,40px);column-gap:8px;position:relative}
+.d{font:600 15px Inter,sans-serif;color:var(--muted);text-align:center}
+.h{font:400 13px "JetBrains Mono",monospace;color:var(--muted);transform:translateY(-8px)}
+.cell{border-top:1px solid var(--line)}
+.ev{border-radius:9px;margin:3px 0;padding:6px 9px;font:500 13px "JetBrains Mono",monospace;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden}
+.busy{background:var(--accent);color:#fff}
+@media (prefers-color-scheme:dark){.busy{color:#00172e}}
+.tent{background:repeating-linear-gradient(135deg,var(--hatch) 0 6px,transparent 6px 12px);border:1.5px solid var(--accent);color:var(--accent)}
+.lbl{font-size:12px;background:var(--card);border-radius:5px;padding:1px 5px;align-self:flex-start;margin:-2px -4px}
+.bar{display:block;height:7px;border-radius:4px;background:currentColor;opacity:.5;width:70%;margin-top:4px}
+.bar.s{width:45%}
+.note{margin-top:16px;font:400 14px "JetBrains Mono",monospace;color:var(--muted);display:flex;gap:18px}
+.note s{opacity:.8}
+</style></head><body>
+<div>
+  <div class="eyebrow">BEGIN:VCALENDAR → busy / free</div>
+  <h1>When you're busy.<br><span>Never what you're doing.</span></h1>
+  <p class="sub">A read-only MCP server that turns private ICS feeds into free and busy time ranges for AI assistants.</p>
+  <div class="tags"><b>get_free_busy</b><b>find_free_slots</b><b>OAuth 2.1</b></div>
+</div>
+<div class="cal">
+  <div class="calhead"><span>ics-calendar-mcp</span><span>09:00–17:00</span></div>
+  <div class="grid">
+    <div></div><div class="d">Mon</div><div class="d">Tue</div><div class="d">Wed</div><div class="d">Thu</div><div class="d">Fri</div>
+    <!-- hour labels + cells -->
+    <div class="h" style="grid-row:2">09</div><div class="h" style="grid-row:3">10</div><div class="h" style="grid-row:4">11</div><div class="h" style="grid-row:5">12</div><div class="h" style="grid-row:6">13</div><div class="h" style="grid-row:7">14</div><div class="h" style="grid-row:8">15</div><div class="h" style="grid-row:9">16</div>
+    <div class="ev busy" style="grid-column:2;grid-row:2/4">busy<i class="bar"></i></div>
+    <div class="ev busy" style="grid-column:2;grid-row:6/7">busy</div>
+    <div class="ev tent" style="grid-column:3;grid-row:3/5"><span class="lbl">tentative</span><i class="bar s"></i></div>
+    <div class="ev busy" style="grid-column:3;grid-row:7/9">busy<i class="bar"></i></div>
+    <div class="ev busy" style="grid-column:4;grid-row:2/3">busy</div>
+    <div class="ev busy" style="grid-column:4;grid-row:5/7">busy<i class="bar s"></i></div>
+    <div class="ev busy" style="grid-column:5;grid-row:4/6">busy<i class="bar"></i></div>
+    <div class="ev tent" style="grid-column:5;grid-row:8/9"><span class="lbl">tentative</span></div>
+    <div class="ev busy" style="grid-column:6;grid-row:2/3">busy</div>
+    <div class="ev busy" style="grid-column:6;grid-row:6/8">busy<i class="bar"></i></div>
+  </div>
+  <div class="note"><s>SUMMARY</s><s>LOCATION</s><s>ATTENDEE</s><span>→ dropped</span></div>
+</div>
+</body></html>
