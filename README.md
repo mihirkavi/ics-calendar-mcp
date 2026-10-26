@@ -1,61 +1,96 @@
-# ICS Calendar MCP
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/banner-dark.png">
+    <img alt="ICS Calendar MCP: share when you're free, not what you're doing. A private MCP server that turns ICS calendar feeds into busy and free time ranges for AI assistants." src=".github/assets/banner-light.png" width="100%">
+  </picture>
+</p>
 
-**Let an AI assistant check when you're free, without showing it what's on your calendar.**
+<p align="center">
+  <strong>Your assistant sees when you're busy. Never what you're doing.</strong><br>
+  A small, read-only <a href="https://modelcontextprotocol.io">Model Context Protocol</a> server that reads your private ICS calendar feeds and answers just two questions: <em>when am I busy?</em> and <em>when am I free?</em>
+</p>
 
-ICS Calendar MCP is a small, read-only [Model Context Protocol](https://modelcontextprotocol.io) server. It reads one or more private ICS subscription feeds (for example, published iCloud or Google calendars) and answers two questions: *when am I busy?* and *when am I free?* Event titles, notes, attendees, locations, and the feed URLs themselves never leave the server. The assistant only ever sees time ranges.
+<p align="center">
+  <a href="#quick-start"><strong>Quick start</strong></a> ·
+  <a href="#the-three-tools"><strong>Tools</strong></a> ·
+  <a href="#privacy-by-design"><strong>Privacy</strong></a> ·
+  <a href="#deploy-your-own"><strong>Deploy</strong></a> ·
+  <a href="CONTRIBUTING.md"><strong>Contribute</strong></a>
+</p>
 
-It runs as a single Cloudflare Worker, protected by OAuth 2.1 with GitHub sign-in and a one-account allowlist, so you can connect it to ChatGPT, Claude, or any MCP client that supports remote servers with OAuth.
+<p align="center">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-111111?style=flat-square"></a>
+  <img alt="Runs on Cloudflare Workers" src="https://img.shields.io/badge/Cloudflare%20Workers%20%C2%B7%20TypeScript-111111?style=flat-square">
+  <img alt="Status: v0.1, early" src="https://img.shields.io/badge/status-v0.1%20early-6b6b6b?style=flat-square">
+  <a href="https://github.com/mihirkavi/ics-calendar-mcp/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/mihirkavi/ics-calendar-mcp/ci.yml?branch=main&style=flat-square&label=CI&color=111111"></a>
+</p>
 
-> **Status: v0.1, an early read-only foundation.** It works end to end, but it hasn't been battle-tested across many calendar providers. See [Limitations](#limitations).
+<p align="center">
+  <img alt="A terminal showing a synthetic test calendar full of secret titles, locations and attendees, and the get_free_busy tool returning only start times, end times and busy or tentative status" src=".github/assets/terminal.png" width="100%">
+  <br><sub>The test calendar above is full of fake secrets. The real <code>get_free_busy</code> tool output beneath it contains none of them, only time ranges.</sub>
+</p>
 
-## What it does
+## Why ICS Calendar MCP
 
-Three MCP tools, all read-only:
+To plan a meeting, an AI assistant needs to know when you're free. Most calendar integrations hand it far more than that: meeting titles, notes, who you're meeting, where, and often write access too.
+
+**ICS Calendar MCP gives the assistant only time ranges.** It reads the private subscription links that iCloud, Google and most calendar apps can publish, strips every event down to a start and an end, merges your calendars, and returns busy blocks or free slots. Event details and feed URLs never leave the server.
+
+<table>
+  <tr>
+    <td width="33%" valign="top">
+      <h3>🙈 Times, not details</h3>
+      Titles, notes, attendees, locations and UIDs are dropped before anything else sees them. Tests check that none of them appear in any output or error.
+    </td>
+    <td width="33%" valign="top">
+      <h3>🔒 Read-only and yours alone</h3>
+      No writes, no CalDAV. Every request needs an OAuth 2.1 token issued to one GitHub account, matched by its permanent numeric ID.
+    </td>
+    <td width="33%" valign="top">
+      <h3>🧭 Honest answers</h3>
+      If a calendar can't be read, it is reported as <code>unavailable</code> and <code>complete</code> is <code>false</code>. An unreadable calendar is never treated as an empty one.
+    </td>
+  </tr>
+</table>
+
+Ask things like *"Find me a free hour on Thursday afternoon"* or *"Am I free Friday between 2 and 4?"*
+
+## The three tools
+
+All three are read-only.
 
 | Tool | What it returns |
 | --- | --- |
-| `list_calendars` | Configured calendar IDs, display names, and timezones, plus the current time. Never feed URLs or secrets. |
-| `get_free_busy` | Merged busy intervals (`start`, `end`, `busy`/`tentative`) across the selected calendars for a range of up to 93 days, with per-calendar coverage. |
-| `find_free_slots` | Free windows of at least N minutes inside daily working hours (default 09:00–17:00 on weekdays), with an optional buffer around meetings. |
+| `list_calendars` | Configured calendar IDs, display names and timezones, plus the current time. Never feed URLs or secrets. |
+| `get_free_busy` | Merged busy intervals (`busy` or `tentative`) across the chosen calendars for up to 93 days, with per-calendar coverage. |
+| `find_free_slots` | Free windows of at least N minutes inside working hours (default 09:00–17:00 on weekdays), with an optional buffer around meetings. |
 
-Example `get_free_busy` result (abridged):
+<details>
+<summary><strong>What calendar data it understands</strong></summary>
+<br>
 
-```json
-{
-  "timezone": "America/Los_Angeles",
-  "busy": [
-    { "start": "2026-10-14T09:00:00-07:00", "end": "2026-10-14T10:30:00-07:00", "status": "busy", "calendarIds": ["work", "family"] }
-  ],
-  "coverage": [
-    { "calendarId": "work", "status": "fresh", "fetchedAt": "2026-10-14T05:00:00.000Z" },
-    { "calendarId": "family", "status": "fresh", "fetchedAt": "2026-10-14T05:00:00.000Z" }
-  ],
-  "complete": true
-}
-```
-
-If any calendar can't be read, its coverage is `unavailable` and `complete` is `false`. The server never treats an unreadable calendar as an empty one.
-
-### Calendar handling
-
-- Timed, all-day, multi-day, and overnight events
+- Timed, all-day, multi-day and overnight events
 - Recurrence (`RRULE`, `RDATE`, `EXDATE`), modified and cancelled occurrences, and `RANGE=THISANDFUTURE`
-- `STATUS:CANCELLED` and `TRANSP:TRANSPARENT` events are skipped. `STATUS:TENTATIVE` events are reported as `tentative`.
-- IANA timezones, embedded `VTIMEZONE` definitions, floating times (interpreted in the calendar's default timezone), and DST transitions
+- `STATUS:CANCELLED` and `TRANSP:TRANSPARENT` events are skipped; `STATUS:TENTATIVE` events are reported as `tentative`
+- IANA timezones, embedded `VTIMEZONE` definitions, floating times (read in the calendar's default timezone) and DST transitions
 - Overlapping events from any number of calendars are merged
 
-## Security and privacy model
+</details>
 
-- **No event content.** The ICS adapter reads only start, end, duration, recurrence, status, and transparency. It projects each occurrence into a bare time interval before anything else sees it. Tests confirm that titles, descriptions, locations, organizers, attendees, UIDs, and raw ICS never appear in tool output or errors.
-- **Callers can't choose URLs.** Feeds come only from an operator-defined registry and Worker secrets. Each fetch requires HTTPS and an exact hostname match. It rejects embedded credentials, custom ports, and redirects, times out after 10 seconds, and stops reading past 5 MiB.
-- **Bounded work.** Query ranges are capped at 93 days. Each calendar may emit at most 10,000 busy occurrences per request and generate at most 100,000 recurrence candidates while expanding.
-- **Authenticated access.** Every MCP request needs an OAuth access token with the `calendar:read` scope. Tokens are issued only after GitHub sign-in, and only to the GitHub account whose immutable numeric ID matches `ALLOWED_GITHUB_USER_ID`. A username is never enough. The MCP handler re-checks that ID and the scope on every request.
-- **Safe OAuth flow.** It uses PKCE (S256), exact redirect-URI validation, and a consent page that can't be framed and is bound to the browser with cookies (CSRF protection). The GitHub `state` is single-use and browser-bound, and the GitHub access token is discarded after the identity check. OAuth state lives in Cloudflare KV, with tokens stored only as hashes.
-- **Redacted errors.** Public errors carry a stable code and a generic message. URLs, query strings, credentials, and calendar text are scrubbed.
+## Quick start
 
-Calendar subscription URLs are bearer secrets: anyone with the link can read the full calendar. Keep them in Worker secrets, and regenerate them in your calendar app if they're ever exposed.
+You need Node.js 22 or newer (24 recommended; see `.nvmrc`).
 
-## Architecture
+```bash
+git clone https://github.com/mihirkavi/ics-calendar-mcp.git
+cd ics-calendar-mcp
+npm install
+npm test        # 125 tests in the Workers runtime (Miniflare), no network access
+```
+
+`npm run check` type-checks and `npm run lint` runs ESLint. To run the Worker locally, copy `.dev.vars.example` to `.dev.vars`, fill it in and run `npm run dev`. The sign-in cookies need HTTPS, so use `wrangler dev --local-protocol https` or test sign-in against a deployed Worker.
+
+## How it works
 
 ```
 MCP client ──OAuth 2.1──▶ Cloudflare Worker
@@ -69,36 +104,39 @@ MCP client ──OAuth 2.1──▶ Cloudflare Worker
                                      └─ interval merge + free-slot search
 ```
 
-| Path | Responsibility |
-| --- | --- |
-| `src/index.ts` | Worker entry: OAuth provider wiring and the protected `/mcp` handler |
-| `src/auth/` | Consent page, GitHub sign-in, numeric-ID allowlist |
-| `src/mcp/` | Tool schemas, registration, and text summaries |
-| `src/calendars/` | Registry, service, ICS adapter, interval math, timezone helpers |
-| `src/security/` | Feed fetch policy and error redaction |
+The server stores no event data: each request fetches the feeds live, turns them into bare intervals and throws the rest away.
 
-The server keeps no event data. Each request fetches the feeds live.
+## Privacy by design
 
-## Requirements
+- **No event content.** The ICS adapter reads only start, end, duration, recurrence, status and transparency.
+- **Callers can't choose URLs.** Feeds come only from an operator-defined registry and Worker secrets. Each fetch needs HTTPS and an exact hostname, rejects embedded credentials, custom ports and redirects, times out after 10 seconds and stops at 5 MiB.
+- **Bounded work.** Ranges are capped at 93 days, 10,000 busy occurrences per calendar and 100,000 recurrence candidates.
+- **Locked-down sign-in.** PKCE (S256), exact redirect-URI checks, a consent page that can't be framed, single-use browser-bound state, and tokens stored only as hashes in Cloudflare KV. The GitHub token is discarded after the identity check.
+- **Redacted errors.** Public errors carry a stable code and a generic message, with URLs, credentials and calendar text scrubbed.
 
-- Node.js 22 or newer (24 recommended; see `.nvmrc`)
-- A Cloudflare account (the Workers free plan is enough to try it)
-- A GitHub account and a GitHub OAuth App for sign-in
+> **Treat calendar subscription links like passwords.** Anyone with the link can read the full calendar. Keep them in Worker secrets, and regenerate them in your calendar app if they're ever exposed.
 
-## Local development
+## Deploy your own
+
+One Cloudflare Worker (the free plan is enough to try it), a GitHub account and a GitHub OAuth App.
 
 ```bash
-npm install
-npm run check   # TypeScript
-npm run lint    # ESLint
-npm test        # Vitest inside the Workers runtime (Miniflare); no network access
+npx wrangler kv namespace create OAUTH_KV          # put the ID in wrangler.jsonc
+npx wrangler secret put GITHUB_CLIENT_ID
+npx wrangler secret put GITHUB_CLIENT_SECRET
+npx wrangler secret put ALLOWED_GITHUB_USER_ID     # numeric: gh api user --jq .id
+npx wrangler secret put CALENDAR_REGISTRY          # JSON array, see below
+npx wrangler secret put CALENDAR_1_ICS_URL         # one per calendar
+npm run deploy
 ```
 
-To run the Worker locally, copy `.dev.vars.example` to `.dev.vars`, fill in your values, and run `npm run dev`. The OAuth consent cookies use the `__Host-` prefix, which needs HTTPS. Use `wrangler dev --local-protocol https` or test the full sign-in flow against a deployed Worker.
+Your MCP endpoint is `https://<your-worker-host>/mcp`. Set the OAuth App's callback URL to `https://<your-worker-host>/callback`.
 
-## Configuring calendars
+<details>
+<summary><strong>Configuring calendars</strong></summary>
+<br>
 
-Without configuration, the server uses one synthetic example calendar (`example-calendar`, read from the `CALENDAR_EXAMPLE_ICS_URL` secret, host `calendar.example.com`). To use your own calendars, set the `CALENDAR_REGISTRY` secret to a JSON array:
+Without configuration, the server uses one synthetic example calendar (`example-calendar`, read from the `CALENDAR_EXAMPLE_ICS_URL` secret, host `calendar.example.com`). To use your own, set `CALENDAR_REGISTRY` to a JSON array:
 
 ```json
 [
@@ -113,74 +151,72 @@ Without configuration, the server uses one synthetic example calendar (`example-
 ]
 ```
 
-- `id`: lowercase letters, digits, and hyphens. This is what MCP clients pass as `calendarIds`.
+- `id`: lowercase letters, digits and hyphens. MCP clients pass it as `calendarIds`.
 - `timezone`: an IANA zone, used for all-day and floating events and as the default output zone.
 - `secretBinding`: the name of a separate Worker secret that holds the feed URL.
 - `allowedHostname`: the exact host the feed URL must use.
 
-Feed URLs must be `https://`. If your calendar app gives you a `webcal://` link, replace `webcal` with `https` when you store it.
+Feed URLs must be `https://`. If your calendar app gives you a `webcal://` link, replace `webcal` with `https`.
 
-## Deploying to Cloudflare
+</details>
 
-1. Create a KV namespace for OAuth state:
+<details>
+<summary><strong>Deployment details and keeping IDs out of Git</strong></summary>
+<br>
 
-   ```bash
-   npx wrangler kv namespace create OAUTH_KV
-   ```
+If you don't want the KV namespace ID in Git, copy `wrangler.jsonc` to `wrangler.local.jsonc` (ignored by Git), edit the copy, and pass `-c wrangler.local.jsonc` to Wrangler. `npm run deploy:local` does this for you. Each `secret put` prompts for its value, so secrets never land in your shell history or in files.
 
-   Put its ID in `wrangler.jsonc`. If you don't want the ID in Git, copy the file to `wrangler.local.jsonc` (ignored by Git), edit the copy, and pass `-c wrangler.local.jsonc` to the Wrangler commands below. `npm run deploy:local` does this for you.
+OAuth discovery is published at `/.well-known/oauth-protected-resource/mcp` and `/.well-known/oauth-authorization-server`, and clients can register dynamically at `/register`.
 
-2. Create a [GitHub OAuth App](https://github.com/settings/developers). Set the homepage URL to your Worker origin and the authorization callback URL to `https://<your-worker-host>/callback`.
-3. Set the secrets (each command prompts for the value):
+</details>
 
-   ```bash
-   npx wrangler secret put GITHUB_CLIENT_ID
-   npx wrangler secret put GITHUB_CLIENT_SECRET
-   npx wrangler secret put ALLOWED_GITHUB_USER_ID   # numeric: gh api user --jq .id
-   npx wrangler secret put CALENDAR_REGISTRY        # JSON array, see above
-   npx wrangler secret put CALENDAR_1_ICS_URL       # one per registry entry
-   ```
+<details>
+<summary><strong>Connecting a client</strong></summary>
+<br>
 
-4. Deploy:
-
-   ```bash
-   npm run deploy
-   ```
-
-   Each `secret put` asks for its value interactively, so secrets never land in your shell history or in files.
-
-The MCP endpoint is `https://<your-worker-host>/mcp`. OAuth discovery is published at `/.well-known/oauth-protected-resource/mcp` and `/.well-known/oauth-authorization-server`, and clients can register dynamically at `/register`.
-
-## Connecting a client
-
-- **ChatGPT:** add a custom MCP server (connector) with the `/mcp` URL and OAuth authentication, then sign in with GitHub when prompted. Availability of custom connectors, and of connectors in mobile and Voice modes, depends on your ChatGPT plan, workspace settings, and OpenAI's current rollout.
-- **MCP Inspector:** run `npx @modelcontextprotocol/inspector`, choose Streamable HTTP, enter the `/mcp` URL, and complete the OAuth flow.
+- **ChatGPT:** add a custom MCP connector with the `/mcp` URL and OAuth, then sign in with GitHub. Whether custom connectors (and connectors in mobile and Voice modes) are available depends on your plan, workspace settings and OpenAI's rollout.
+- **MCP Inspector:** run `npx @modelcontextprotocol/inspector`, choose Streamable HTTP, enter the `/mcp` URL and complete the OAuth flow.
 - **Other clients:** any client that supports remote Streamable HTTP servers with OAuth 2.1 discovery and dynamic client registration should work.
 
-Example prompts: "What does my calendar look like tomorrow?", "Find me a free hour on Thursday afternoon", "Am I free Friday between 2 and 4?"
+</details>
 
-## Limitations
+<details>
+<summary><strong>Where the code lives</strong></summary>
+<br>
 
-- Read-only. There's no way to create, edit, or delete events, and no CalDAV.
-- One allowed GitHub account per deployment. Multi-user access isn't supported.
-- Feeds are fetched live on every request. A slow or offline provider makes that calendar `unavailable` (reported, never silently empty). There's no cache.
-- ICS feeds published by calendar apps can lag behind the app by several minutes, depending on the provider.
-- Working-hour windows can't cross midnight, and `find_free_slots` returns at most 100 windows.
-- A calendar that needs more than 100,000 recurrence candidates to reach the end of the query (for example, a minute-level rule running for years), or that has more than 10,000 busy occurrences in the range, is reported as `unavailable` for that request.
-- Timezone names without a matching `VTIMEZONE` must be IANA names. Windows-style names such as `Pacific Standard Time` are only understood when the feed includes their definition.
+| Path | Responsibility |
+| --- | --- |
+| `src/index.ts` | Worker entry: OAuth provider wiring and the protected `/mcp` handler |
+| `src/auth/` | Consent page, GitHub sign-in, numeric-ID allowlist |
+| `src/mcp/` | Tool schemas, registration and text summaries |
+| `src/calendars/` | Registry, service, ICS adapter, interval math, timezone helpers |
+| `src/security/` | Feed fetch policy and error redaction |
 
-## Roadmap
+</details>
 
-These are ideas, not commitments, and none of them are implemented:
+## Honest status
 
-- Optional short-lived caching with explicit `stale` coverage
-- Per-calendar working hours
-- CalDAV as an alternative source
+**v0.1 is an early, read-only foundation.** It works end to end and has been verified with a standalone MCP client against one private deployment ([record](docs/verification/chatgpt-plugin-verification.md)), but it hasn't been tested across many calendar providers, and ChatGPT connector use is not yet verified.
 
-## Contributing and security
+- Read-only: no creating, editing or deleting events, and no CalDAV.
+- One allowed GitHub account per deployment; no multi-user access.
+- Feeds are fetched live on every request with no cache. A slow or offline provider makes that calendar `unavailable` (reported, never silently empty).
+- Published ICS feeds can lag behind the calendar app by several minutes.
+- Working hours can't cross midnight, and `find_free_slots` returns at most 100 windows.
+- A calendar that needs more than 100,000 recurrence candidates, or has more than 10,000 busy occurrences in the range, is reported as `unavailable` for that request.
+- Windows-style timezone names such as `Pacific Standard Time` work only when the feed includes their definition.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Please report vulnerabilities privately as described in [SECURITY.md](SECURITY.md), not in public issues.
+**Ideas, not commitments (none implemented):** short-lived caching with explicit `stale` coverage, per-calendar working hours, and CalDAV as another source.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) and the [changelog](CHANGELOG.md). Please report vulnerabilities privately as described in [SECURITY.md](SECURITY.md), not in public issues.
 
 ## License
 
 [MIT](LICENSE) © 2026 Mihir Kavishwar
+
+<p align="center">
+  <br>
+  <sub><strong>ICS Calendar MCP</strong> · Free time, not your private life.</sub>
+</p>
